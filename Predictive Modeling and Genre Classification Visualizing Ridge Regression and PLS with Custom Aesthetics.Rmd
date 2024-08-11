@@ -1,0 +1,89 @@
+---
+title: 'Visualizing Popularity Predictions: A Logistic Regression Approach with Custom
+  Color Aesthetics'
+author: "Avery Holloman"
+date: "2024-08-07"
+output: html_document
+---
+
+```{r}
+# libraries
+library(MASS)
+library(pls)
+library(readxl)
+library(tidyverse)
+
+# datset
+data <-read_excel("C:/Users/jacob/Downloads/large_song_dataset.xlsx")
+head(data)
+
+```
+
+
+```{r}
+#Data for Modeling
+
+#My most relevant numerical columns
+X <- as.matrix(data[, c("bitrate", "favorites_count", "play_count")])
+y <- as.vector(data$popularity_index)
+
+# Checking for missing values in my dataset
+X <- na.omit(X)
+y <- na.omit(y)
+
+```
+
+```{r}
+# Ridge Regression
+lambda <- 1e10  
+beta_ridge <- solve(t(X) %*% X + lambda * diag(ncol(X))) %*% t(X) %*% y
+beta_ridge_normalized <- beta_ridge / sqrt(sum(beta_ridge^2))
+
+# Partial Least Squares (PLS)
+pls_model <- plsr(y ~ X, ncomp = 1, validation = "none")
+beta_pls <- coef(pls_model, ncomp = 1)
+beta_pls_normalized <- beta_pls / sqrt(sum(beta_pls^2))
+
+# Comparing the estimates
+comparison <- cbind(beta_ridge_normalized, beta_pls_normalized)
+colnames(comparison) <- c("Ridge Normalized", "PLS Normalized")
+
+print(comparison)
+
+```
+```{r}
+#bar plot to see the comparison of the results
+barplot(comparison)
+```
+```{r}
+#Histogram to get a better understanding
+hist(comparison)
+```
+```{r}
+#Simply adding color to get a better understanding of my results
+hist(comparison, 
+                  main = "Histogram Example",
+                  xlab = "Value",
+                  ylab = "Frequency",
+                  col = rainbow(10),    # Fill color using rainbow palette
+                  border = "black")     # Border color
+```
+
+```{r}
+# Testing where on the graph are the points located with a scatter plot
+#sample results
+ridge_normalized <- c(0.3861142, 0.8430689, 0.3743670)
+pls_normalized <- c(-0.003158576, 0.025057827, -0.999681013)
+
+# Scatter plot
+plot(ridge_normalized, pls_normalized,
+     main = "Scatter Plot of Normalized Coefficients",
+     xlab = "Ridge Normalized",
+     ylab = "PLS Normalized",
+     pch = 19,                
+     col = rainbow(length(ridge_normalized)), 
+     cex = 1.5)               
+
+```
+
+
