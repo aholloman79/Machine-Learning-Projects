@@ -1,0 +1,141 @@
+---
+title: "Predict Taxi Fares in Miami with Random Forests"
+author: "Avery Holloman"
+date: "2024-08-06"
+output: html_document
+---
+
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(viridis)
+library(lubridate)
+library(tree)
+library(randomForest)
+
+# Read in the taxi data from your Excel file
+taxi <- read_excel("C:/Users/jacob/Downloads/florida_taxi_data.xlsx")
+
+# Define the columns you want to keep
+columns <- c('medallion', 'pickup_datetime', 'pickup_longitude', 'pickup_latitude', 
+             'trip_time_in_secs', 'fare_amount', 'tip_amount')
+
+# Filter the dataset based on existing columns and apply transformations
+taxi <- taxi %>%
+    select(all_of(columns)) %>%  # Select only the relevant columns
+    rename(lat = pickup_latitude, long = pickup_longitude) %>%  # Rename columns
+    filter(fare_amount > 0)  # Filter out rows where the fare is zero or negative
+
+# View the first few rows of the cleaned dataset
+head(taxi)
+```
+
+```{r}
+library(osmdata)
+library(sf)
+library(ggplot2)
+
+# Define the bounding box for Miami
+bbox <- c(left = -80.30, bottom = 25.70, right = -80.10, top = 25.85)
+
+# Query OSM data for streets and other features
+miami_osm <- opq(bbox = bbox) %>%
+  add_osm_feature(key = 'highway') %>%
+  osmdata_sf()
+
+# Plot the Miami map using ggplot2
+ggplot() +
+  geom_sf(data = miami_osm$osm_lines, color = "grey20", size = 0.5) +
+  coord_sf(xlim = c(-80.30, -80.10), ylim = c(25.70, 25.85)) +
+  theme_minimal() +
+  labs(title = "Map of Miami, FL", x = "Longitude", y = "Latitude")
+```
+
+```{r}
+# Plot the Miami map with taxi data
+ggplot() +
+  geom_sf(data = miami_osm$osm_lines, color = "grey20", size = 0.5) +
+  geom_bin2d(data = taxi, aes(x = long, y = lat), bins = 60, alpha = 0.6) +
+  scale_fill_viridis_c(option = 'plasma', name = "Total") +
+  coord_sf(xlim = c(-80.30, -80.10), ylim = c(25.70, 25.85)) +
+  labs(title = "Miami Taxi Data", x = "Longitude", y = "Latitude") +
+  theme_minimal()
+```
+
+```{r}
+# Prepare the data with additional features
+taxi <- taxi %>%
+    mutate(hour = hour(pickup_datetime), 
+           wday = wday(pickup_datetime, label = TRUE), 
+           month = month(pickup_datetime, label = TRUE))
+
+# Fit a regression tree model
+fitted_tree <- tree(fare_amount ~ lat + long + hour + wday + month, data = taxi)
+
+# Plot the regression tree
+plot(fitted_tree, col = "darkorange")
+text(fitted_tree, pretty = 0, cex = 0.7)
+
+# Summary of the tree model
+summary(fitted_tree)
+```
+
+```{r}
+# Check the number of rows in your dataset
+num_rows <- nrow(taxi)
+
+# Fit a random forest model with an appropriate sampsize
+fitted_forest <- randomForest(fare_amount ~ lat + long + hour + wday + month, 
+                              data = taxi, ntree = 80, sampsize = min(10000, num_rows))
+
+# Print the random forest model
+print(fitted_forest)
+
+```
+
+```{r}
+# Add predictions to the taxi dataset
+taxi$pred_total <- fitted_forest$predicted
+
+# Predicted fare map
+ggplot() +
+  geom_sf(data = miami_osm$osm_lines, color = "grey20", size = 0.5) +
+  geom_bin2d(data = taxi, aes(x = long, y = lat, fill = pred_total), bins = 60, alpha = 0.6) +
+  scale_fill_viridis_c(option = 'plasma', name = "Predicted Fare") +
+  coord_sf(xlim = c(-80.30, -80.10), ylim = c(25.70, 25.85)) +
+  labs(title = "Predicted Taxi Fares in Miami", x = "Longitude", y = "Latitude") +
+  theme_minimal()
+
+# Actual fare map
+ggplot() +
+  geom_sf(data = miami_osm$osm_lines, color = "grey20", size = 0.5) +
+  geom_bin2d(data = taxi, aes(x = long, y = lat, fill = fare_amount), bins = 60, alpha = 0.6) +
+  scale_fill_viridis_c(option = 'plasma', name = "Total Fare") +
+  coord_sf(xlim = c(-80.30, -80.10), ylim = c(25.70, 25.85)) +
+  labs(title = "Actual Taxi Fares in Miami", x = "Longitude", y = "Latitude") +
+  theme_minimal()
+```
+
+
+```{r}
+# Calculate average predicted and actual fares by hour
+taxi_hourly <- taxi %>%
+    group_by(hour) %>%
+    summarize(pred_per_hour = mean(pred_total, na.rm = TRUE),
+              per_hour = mean(fare_amount, na.rm = TRUE))
+
+# Plotting predicted vs actual fares by hour
+colors <- c("darkorange", "darkblue")
+
+ggplot(taxi_hourly, aes(x = hour)) + 
+    geom_line(aes(y = pred_per_hour, color = colors[1]), size = 1.2) + 
+    geom_line(aes(y = per_hour, color = colors[2]), size = 1.2) +
+    scale_color_manual(name = '', values = colors, labels = c("Predicted", "Actual")) +
+    labs(x = "Hour of Day", y = "Average Fare") +
+    theme_minimal() + 
+    theme(legend.position = c(0.8, 0.8), legend.title = element_blank())
+```
+
+
